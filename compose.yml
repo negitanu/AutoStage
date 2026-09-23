@@ -1,0 +1,33 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:4310:4310"
+    environment:
+      AUTOSTAGE_LAYA_BASE_URL: http://laya:8001
+      AUTOSTAGE_MODEL_BASE_URL: http://host.docker.internal:11434/v1
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - autostage_data:/app/data
+    shm_size: 1gb
+    depends_on:
+      - laya
+    restart: unless-stopped
+
+  laya:
+    build:
+      context: .
+      dockerfile: services/laya/Dockerfile
+    environment:
+      LAYA_DEVICE: cpu
+    volumes:
+      - laya_models:/data/huggingface
+    restart: unless-stopped
+
+volumes:
+  autostage_data:
+  laya_models:
