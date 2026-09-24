@@ -102,8 +102,10 @@ export async function generateScenario(
   settings: Settings,
   apiKey?: string,
 ): Promise<ScenarioInput> {
-  if (settings.modelProvider === 'openrouter' && !apiKey)
-    throw new Error('OpenRouter API キーを設定してください');
+  if (settings.modelProvider !== 'local' && !apiKey)
+    throw new Error(
+      `${settings.modelProvider === 'azure' ? 'Azure OpenAI' : 'OpenRouter'} API キーを設定してください`,
+    );
   const abort = AbortSignal.timeout(120_000);
   let stagehand: Stagehand | undefined;
   const browser = await localBrowser.launch({

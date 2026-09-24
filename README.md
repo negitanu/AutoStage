@@ -1,6 +1,6 @@
 # AutoStage
 
-Stagehand v4、ローカル生成モデル（Qwen / Gemma）または OpenRouter、Laya を組み合わせた Web アプリの機能回帰テストツールです。ダーク基調のワークベンチでシナリオの作成、実行、ステップごとの画面確認、履歴の調査を行います。
+Stagehand v4、ローカル生成モデル（Qwen / Gemma）または OpenRouter / Azure OpenAI、Laya を組み合わせた Web アプリの機能回帰テストツールです。ダーク基調のワークベンチでシナリオの作成、実行、ステップごとの画面確認、履歴の調査を行います。
 
 ## 起動
 
@@ -34,9 +34,9 @@ docker compose up --build -d
 
 http://127.0.0.1:4310 を開いてください。アプリ用コンテナに Chromium / Stagehand v4、もう一方に Laya を配置します。Laya は初回起動時にモデルを取得するため、判定が使えるまで時間がかかります。状態は設定画面の「接続確認」または `docker compose logs -f laya` で確認できます。
 
-設定・実行履歴・スクリーンショット・保存済みの OpenRouter API キーは `autostage_data` ボリューム、Laya のモデルは `laya_models` ボリュームに保持します。`docker compose down` では消えません。停止は `docker compose down` です。Docker とローカル実行のデータは別々です。
+設定・実行履歴・スクリーンショット・保存済みの OpenRouter / Azure OpenAI API キーは `autostage_data` ボリューム、Laya のモデルは `laya_models` ボリュームに保持します。`docker compose down` では消えません。停止は `docker compose down` です。Docker とローカル実行のデータは別々です。
 
-既定では API をホストの `127.0.0.1:4310` だけに公開します。OpenRouter を使う場合は UI の「設定」で接続先、モデル ID、API キーを保存してください。環境変数 `OPENROUTER_API_KEY` を Compose に渡す方法も使えます。ホストで起動した Ollama / LM Studio を使う場合、モデルの API ベース URL は `http://host.docker.internal:11434/v1`（Ollama）などにします。コンテナ内の `127.0.0.1` はホストではなくアプリのコンテナを指します。
+既定では API をホストの `127.0.0.1:4310` だけに公開します。クラウドモデルを使う場合は UI の「設定」で接続先、モデル ID またはデプロイ名、API キーを保存してください。環境変数 `OPENROUTER_API_KEY` / `AZURE_OPENAI_API_KEY` を Compose に渡す方法も使えます。ホストで起動した Ollama / LM Studio を使う場合、モデルの API ベース URL は `http://host.docker.internal:11434/v1`（Ollama）などにします。コンテナ内の `127.0.0.1` はホストではなくアプリのコンテナを指します。
 
 Compose 初回起動時の Laya URL は `http://laya:8001` に設定されます。既存のボリュームで設定を保存済みの場合は、その保存済み設定が優先されます。ローカル実行から Docker に切り替えた際は設定画面で接続先を確認してください。
 
@@ -71,6 +71,12 @@ API キーはサーバーの `.data/credentials.json` に所有者のみ読み�
 
 OpenRouter 選択時の AI 操作は、観測した DOM / テキストと操作指示を OpenRouter およびモデル提供者に送信し、API 利用料が発生します。スクリーンショットはモデルに送信しません。ブラウザ実行と Laya の意味判定は引き続きローカルです。
 
+## Azure OpenAI の接続
+
+「設定」→「接続先」で **Azure OpenAI · Cloud API** を選び、Azure リソース URL（例: `https://your-resource.openai.azure.com`）、**デプロイ名**、API キーを入力して保存します。`https://your-resource.services.ai.azure.com` 形式も使えます。デプロイには JSON Schema の構造化出力に対応するモデルを割り当ててください。
+
+Azure v1 API の `/openai/v1/chat/completions` に `api-key` ヘッダーで接続し、`model` にデプロイ名を渡します。URL に `/openai/v1` を含めても構いません。接続確認は `/openai/v1/models` の取得までで、デプロイ名の存在や推論の成功は確認しません。API キーは OpenRouter のキーと別に `.data/credentials.json` へ 0600 権限で保存し、環境変数 `AZURE_OPENAI_API_KEY` がある場合はそちらを優先します。Azure 選択時のページ観測内容と試験指示は Azure OpenAI に送信され、API 利用料が発生します。
+
 ## Laya の接続
 
 Python 3.12 と [uv](https://docs.astral.sh/uv/) を推奨します。
@@ -95,9 +101,9 @@ uv pip install --python .venv/bin/python -r services/laya/requirements.txt
 
 ## シナリオと結果
 
-「AI でシナリオ作成」で対象ページの URL と試験内容を文章で指定できます。Stagehand v4 がページをブラウザで開き、アクセシビリティ情報、フォーム、ボタン、リンクを観測します。選択中のローカル生成モデルまたは OpenRouter が、その観測結果をもとに操作・検証ステップの下書きを作ります。生成した下書きは編集画面に表示され、内容を確認して保存するまでシナリオ一覧に追加されません。
+「AI でシナリオ作成」で対象ページの URL と試験内容を文章で指定できます。Stagehand v4 がページをブラウザで開き、アクセシビリティ情報、フォーム、ボタン、リンクを観測します。選択中のローカル生成モデル、OpenRouter または Azure OpenAI が、その観測結果をもとに操作・検証ステップの下書きを作ります。生成した下書きは編集画面に表示され、内容を確認して保存するまでシナリオ一覧に追加されません。
 
-対象ページは新しいブラウザプロフィールで開くため、ログイン済みのブラウザセッションは引き継がれません。ログイン後のページなど、初回観測で見えない状態の要素や期待テキストは推測しません。生成後にステップを確認し、必要に応じて編集してください。OpenRouter 選択中はページの観測内容と試験指示が外部モデルに送信されます。
+対象ページは新しいブラウザプロフィールで開くため、ログイン済みのブラウザセッションは引き継がれません。ログイン後のページなど、初回観測で見えない状態の要素や期待テキストは推測しません。生成後にステップを確認し、必要に応じて編集してください。OpenRouter / Azure OpenAI 選択中はページの観測内容と試験指示が外部モデルに送信されます。
 
 - ページ遷移、CSS セレクターによるクリック・入力、自然言語による AI 操作。
 - テキストの包含、URL の完全一致、要素の表示、Laya の意味判定。
@@ -118,7 +124,7 @@ uv pip install --python .venv/bin/python -r services/laya/requirements.txt
 - `src/`: React / TypeScript のワークベンチ
 - `server/index.ts`: ローカル Express API、SSE、直列の実行キュー
 - `server/worker.ts`: 別プロセスの Stagehand v4 ブラウザ実行
-- `server/model.ts`: ローカル / OpenRouter の生成モデルアダプターと確率判定
+- `server/model.ts`: ローカル / OpenRouter / Azure OpenAI の生成モデルアダプターと確率判定
 - `server/store.ts`: SQLite 永続化
 - `services/laya/app.py`: Python / FastAPI / Laya 判定サービス
 - `shared/schema.ts`: 共通型・入力バリデーション
@@ -136,7 +142,7 @@ npm run build        # TypeScript と本番ビルド
 
 ブラウザ結合テストは 4312 ポートを使い、ログイン、検索、PNG 保存、意図的な失敗、タイムアウト、後続スキップ、キャンセル、履歴不変性、エクスポート、Origin 制御を検証します。Stagehand の `act` → ローカル OpenAI 互換 API → 実ブラウザのクリックという経路も検証します。生成モデルの応答と Laya の不確かな判定を再現する部分は、明示した HTTP フィクスチャを使用します。本番機能にはモックの実行モードはありません。
 
-実モデルでの確認: Laya 0.3.5 で英語・日本語の推論と、文脈長超過時に切り詰めず拒否する動作を確認しました。起動済みの Laya に対して `.venv/bin/python scripts/check-laya.py` で再検証できます。Qwen / Gemma の実推論はモデルを別途起動して確認してください。OpenRouter の認証・構造化出力要求・エラー処理はフィクスチャで検証しています。実 API キーを用いた有料推論は未検証です。
+実モデルでの確認: Laya 0.3.5 で英語・日本語の推論と、文脈長超過時に切り詰めず拒否する動作を確認しました。起動済みの Laya に対して `.venv/bin/python scripts/check-laya.py` で再検証できます。Qwen / Gemma の実推論はモデルを別途起動して確認してください。OpenRouter / Azure OpenAI の認証・構造化出力要求・エラー処理はフィクスチャで検証しています。Azure の実 API キーを用いた有料推論は未検証です。
 
 ## 参照
 
@@ -146,3 +152,5 @@ npm run build        # TypeScript と本番ビルド
 
 - [OpenRouter structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs)
 - [OpenRouter API key verification](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+- [Azure OpenAI v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle)
+- [Azure OpenAI structured outputs](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs)

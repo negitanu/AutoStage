@@ -13,7 +13,13 @@ const dir = await mkdtemp(path.join(tmpdir(), 'autostage-smoke-'));
 const base = 'http://127.0.0.1:4312';
 let log = '';
 const child = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
-  env: { ...process.env, PORT: '4312', AUTOSTAGE_DATA_DIR: dir, OPENROUTER_API_KEY: '' },
+  env: {
+    ...process.env,
+    PORT: '4312',
+    AUTOSTAGE_DATA_DIR: dir,
+    OPENROUTER_API_KEY: '',
+    AZURE_OPENAI_API_KEY: '',
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 child.stdout.on('data', (b) => (log += String(b)));
@@ -278,6 +284,27 @@ try {
   assert.match(health.model.message, /API キー/);
   console.log(
     'PASS OpenRouter settings round-trip, blank-key retention, key deletion, missing-key health and secret-free export',
+  );
+  const azureSecret = 'test-azure-key-never-send';
+  await request('/settings', 'PUT', {
+    ...initial.settings,
+    modelProvider: 'azure',
+    azureEndpoint: 'https://sample.openai.azure.com',
+    azureDeployment: 'smoke-deployment',
+    azureApiKey: azureSecret,
+  });
+  const azureState = await state();
+  assert.equal(azureState.settings.modelProvider, 'azure');
+  assert.equal(azureState.settings.azureDeployment, 'smoke-deployment');
+  assert.equal(JSON.stringify(azureState).includes(azureSecret), false);
+  await request('/settings', 'PUT', { ...azureState.settings, azureApiKey: '' });
+  const azureKept = await request<{ credentials: { azureKeySource: string } }>('/state');
+  assert.equal(azureKept.credentials.azureKeySource, 'saved');
+  await request('/settings', 'PUT', { ...azureState.settings, clearAzureApiKey: true });
+  const azureCleared = await request<{ credentials: { azureKeySource: string } }>('/state');
+  assert.equal(azureCleared.credentials.azureKeySource, 'none');
+  console.log(
+    'PASS Azure settings round-trip, key retention and deletion without exposing secrets',
   );
 } finally {
   child.kill('SIGTERM');

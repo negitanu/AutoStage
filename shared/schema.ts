@@ -72,8 +72,27 @@ const privateUrl = (hosts: string[]) =>
     );
   }, '許可されたローカル / Docker 内の HTTP(S) URL を指定してください');
 export const settingsSchema = z.object({
-  modelProvider: z.enum(['local', 'openrouter']).default('local'),
+  modelProvider: z.enum(['local', 'openrouter', 'azure']).default('local'),
   openRouterModel: z.string().trim().min(1).max(120).default('openai/gpt-4o-mini'),
+  azureEndpoint: z
+    .url()
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        url.protocol === 'https:' &&
+        !url.username &&
+        !url.password &&
+        !url.port &&
+        (url.pathname === '/' || url.pathname === '/openai/v1' || url.pathname === '/openai/v1/') &&
+        !url.search &&
+        !url.hash &&
+        [/[.]openai[.]azure[.]com$/, /[.]services[.]ai[.]azure[.]com$/].some((domain) =>
+          domain.test(url.hostname),
+        )
+      );
+    }, 'Azure OpenAI の HTTPS リソース URL を指定してください')
+    .default('https://example.openai.azure.com'),
+  azureDeployment: z.string().trim().min(1).max(120).default('gpt-4o-mini'),
   modelBaseUrl: privateUrl(['host.docker.internal']).default('http://127.0.0.1:11434/v1'),
   modelName: z.string().trim().min(1).max(120).default('qwen3:8b'),
   layaBaseUrl: privateUrl(['laya']).default('http://127.0.0.1:8001'),
@@ -92,15 +111,36 @@ export const settingsUpdateSchema = settingsSchema
       .regex(/^\S*$/, 'API キーに空白は使用できません')
       .optional(),
     clearOpenRouterApiKey: z.boolean().optional(),
+    azureApiKey: z
+      .string()
+      .trim()
+      .max(512)
+      .regex(/^\S*$/, 'API キーに空白は使用できません')
+      .optional(),
+    clearAzureApiKey: z.boolean().optional(),
   })
   .refine(
-    (v) => !(v.openRouterApiKey && v.clearOpenRouterApiKey),
+    (v) =>
+      !(v.openRouterApiKey && v.clearOpenRouterApiKey) && !(v.azureApiKey && v.clearAzureApiKey),
     'キーの更新と削除は同時にできません',
   );
 export type SettingsUpdate = z.infer<typeof settingsUpdateSchema>;
-export type CredentialStatus = { openRouterKeySource: 'environment' | 'saved' | 'none' };
+export type CredentialStatus = {
+  openRouterKeySource: 'environment' | 'saved' | 'none';
+  azureKeySource: 'environment' | 'saved' | 'none';
+};
 export const modelLabel = (settings: Settings) =>
-  settings.modelProvider === 'openrouter' ? settings.openRouterModel : settings.modelName;
+  settings.modelProvider === 'openrouter'
+    ? settings.openRouterModel
+    : settings.modelProvider === 'azure'
+      ? settings.azureDeployment
+      : settings.modelName;
+export const providerLabel = (provider: Settings['modelProvider']) =>
+  provider === 'openrouter'
+    ? 'OpenRouter'
+    : provider === 'azure'
+      ? 'Azure OpenAI'
+      : 'ローカル生成モデル';
 export type Step = z.infer<typeof stepSchema>;
 export type ScenarioInput = z.infer<typeof scenarioSchema>;
 export type Scenario = ScenarioInput & { id: string; createdAt: string; updatedAt: string };

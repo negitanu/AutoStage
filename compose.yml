@@ -9,6 +9,7 @@ services:
       AUTOSTAGE_LAYA_BASE_URL: http://laya:8001
       AUTOSTAGE_MODEL_BASE_URL: http://host.docker.internal:11434/v1
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

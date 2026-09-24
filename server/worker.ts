@@ -8,7 +8,13 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { modelLabel, type Run, type Step, type StepResult } from '../shared/schema.js';
+import {
+  modelLabel,
+  providerLabel,
+  type Run,
+  type Step,
+  type StepResult,
+} from '../shared/schema.js';
 import { createModel, verdict } from './model.js';
 
 let browser: StagehandBrowser | undefined;
@@ -74,7 +80,7 @@ async function perform(
       if (!result.data.success)
         throw new Error(result.data.message || 'AI 操作が完了しませんでした');
       return {
-        message: `${run.settings.modelProvider === 'openrouter' ? 'OpenRouter' : 'ローカル生成モデル'}で操作しました`,
+        message: `${providerLabel(run.settings.modelProvider)}で操作しました`,
       };
     }
     case 'assertVisible':
@@ -167,7 +173,7 @@ async function execute(run: Run, dataDir: string, modelApiKey?: string) {
     if (!page) page = await browser.context.newPage();
     if (run.scenario.steps.some((s) => s.type === 'act')) {
       log(
-        `AI 操作: ${modelLabel(run.settings)} · ${run.settings.modelProvider === 'openrouter' ? 'OpenRouter' : run.settings.modelBaseUrl}`,
+        `AI 操作: ${modelLabel(run.settings)} · ${run.settings.modelProvider === 'local' ? run.settings.modelBaseUrl : providerLabel(run.settings.modelProvider)}`,
       );
     }
     for (let i = 0; i < run.scenario.steps.length; i++) {

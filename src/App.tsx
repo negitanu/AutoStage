@@ -47,6 +47,7 @@ import {
 import {
   labels,
   modelLabel,
+  providerLabel,
   type CredentialStatus,
   type SettingsUpdate,
   stepTypes,
@@ -478,7 +479,9 @@ export default function App() {
             <span>
               {state.settings.modelProvider === 'openrouter'
                 ? 'OpenRouter + Local Laya'
-                : '推論はローカルで実行'}
+                : state.settings.modelProvider === 'azure'
+                  ? 'Azure OpenAI + Local Laya'
+                  : '推論はローカルで実行'}
             </span>
             <ShieldCheck size={13} />
           </div>
@@ -502,7 +505,9 @@ export default function App() {
           <div className="topbar-right">
             <span className="local-chip">
               <span />
-              {state.settings.modelProvider === 'openrouter' ? 'OpenRouter' : 'Local only'}
+              {state.settings.modelProvider === 'local'
+                ? 'Local only'
+                : providerLabel(state.settings.modelProvider)}
             </span>
             <span className="divider" />
             <a href="/demo/" target="_blank" rel="noreferrer">
@@ -1081,7 +1086,11 @@ export default function App() {
         <GenerateDialog
           initialUrl={scenarioEntryUrl(scenario)}
           modelName={modelLabel(state.settings)}
-          cloud={state.settings.modelProvider === 'openrouter'}
+          cloudProvider={
+            state.settings.modelProvider === 'local'
+              ? undefined
+              : providerLabel(state.settings.modelProvider)
+          }
           onClose={() => setModal(null)}
           onGenerated={(initial) => setModal({ type: 'edit', initial })}
         />
@@ -1142,13 +1151,13 @@ export default function App() {
 function GenerateDialog({
   initialUrl,
   modelName,
-  cloud,
+  cloudProvider,
   onClose,
   onGenerated,
 }: {
   initialUrl: string;
   modelName: string;
-  cloud: boolean;
+  cloudProvider?: string;
   onClose: () => void;
   onGenerated: (initial: ScenarioInput) => void;
 }) {
@@ -1210,9 +1219,10 @@ function GenerateDialog({
             <span>生成モデル</span>
             <strong>{modelName}</strong>
           </div>
-          {cloud && (
+          {cloudProvider && (
             <p className="field-hint">
-              ページの内容と試験指示を OpenRouter に送信します。API 利用料が発生する場合があります。
+              ページの内容と試験指示を {cloudProvider} に送信します。API
+              利用料が発生する場合があります。
             </p>
           )}
           {error && (
@@ -1510,13 +1520,18 @@ function SettingsDialog({
   const [draft, setDraft] = useState(settings);
   const [apiKey, setApiKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
-  const remote = draft.modelProvider === 'openrouter';
+  const [azureApiKey, setAzureApiKey] = useState('');
+  const [clearAzureKey, setClearAzureKey] = useState(false);
+  const openRouter = draft.modelProvider === 'openrouter';
   const sameConnection =
     draft.modelProvider === settings.modelProvider &&
     modelLabel(draft) === modelLabel(settings) &&
     draft.modelBaseUrl === settings.modelBaseUrl &&
+    draft.azureEndpoint === settings.azureEndpoint &&
     !apiKey &&
-    !clearKey;
+    !clearKey &&
+    !azureApiKey &&
+    !clearAzureKey;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   return (
@@ -1527,9 +1542,17 @@ function SettingsDialog({
           setBusy(true);
           setError('');
           try {
-            await onSave({ ...draft, openRouterApiKey: apiKey, clearOpenRouterApiKey: clearKey });
+            await onSave({
+              ...draft,
+              openRouterApiKey: apiKey,
+              clearOpenRouterApiKey: clearKey,
+              azureApiKey,
+              clearAzureApiKey: clearAzureKey,
+            });
             setApiKey('');
             setClearKey(false);
+            setAzureApiKey('');
+            setClearAzureKey(false);
           } catch (e) {
             setError((e as Error).message);
           } finally {
@@ -1561,9 +1584,10 @@ function SettingsDialog({
               >
                 <option value="local">ローカル · Ollama / LM Studio</option>
                 <option value="openrouter">OpenRouter · Cloud API</option>
+                <option value="azure">Azure OpenAI · Cloud API</option>
               </select>
             </label>
-            {remote ? (
+            {openRouter ? (
               <>
                 <div className="provider-notice">
                   <Globe size={17} />
@@ -1633,6 +1657,85 @@ function SettingsDialog({
                 <div className="code-hint">
                   <ShieldCheck size={13} />
                   <code>openrouter.ai/api/v1</code>
+                </div>
+              </>
+            ) : draft.modelProvider === 'azure' ? (
+              <>
+                <div className="provider-notice">
+                  <Globe size={17} />
+                  <p>
+                    AI 操作時、ページの内容と操作指示を Azure OpenAI に送信します。API
+                    利用料が発生します。 ブラウザと Laya の判定はローカルで実行します。
+                  </p>
+                </div>
+                <label>
+                  Azure リソース URL
+                  <input
+                    type="url"
+                    required
+                    value={draft.azureEndpoint}
+                    onChange={(e) => setDraft({ ...draft, azureEndpoint: e.target.value })}
+                    placeholder="https://your-resource.openai.azure.com"
+                  />
+                </label>
+                <p className="field-hint">
+                  Azure OpenAI リソースの HTTPS URL を指定します。末尾の /openai/v1 は省略できます。
+                </p>
+                <label>
+                  デプロイ名
+                  <input
+                    required
+                    value={draft.azureDeployment}
+                    onChange={(e) => setDraft({ ...draft, azureDeployment: e.target.value })}
+                    placeholder="gpt-4o-mini"
+                  />
+                </label>
+                <p className="field-hint">
+                  モデル名ではなく Azure で作成したデプロイ名を指定してください。JSON Schema
+                  の構造化出力に対応するモデルが必要です。
+                </p>
+                <label>
+                  Azure OpenAI API キー
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    value={azureApiKey}
+                    disabled={credentials.azureKeySource === 'environment' || clearAzureKey}
+                    onChange={(e) => setAzureApiKey(e.target.value)}
+                    placeholder={
+                      credentials.azureKeySource === 'none'
+                        ? 'Azure リソースの API キー'
+                        : '設定済み · 空欄で現在のキーを保持'
+                    }
+                  />
+                </label>
+                <p className="field-hint">
+                  {credentials.azureKeySource === 'environment'
+                    ? '環境変数 AZURE_OPENAI_API_KEY を使用中。変更はサーバー側で行ってください。'
+                    : credentials.azureKeySource === 'saved'
+                      ? 'API キーはサーバーに保存済みです。履歴・レポートには含まれません。'
+                      : 'API キーを入力して設定を保存してください。キーはサーバー側だけに保存します。'}
+                </p>
+                {credentials.azureKeySource === 'saved' && (
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={clearAzureKey}
+                      onChange={(e) => {
+                        setClearAzureKey(e.target.checked);
+                        setAzureApiKey('');
+                      }}
+                    />
+                    保存時に API キーを削除
+                  </label>
+                )}
+                <div className="code-hint">
+                  <ShieldCheck size={13} />
+                  <code>
+                    {draft.azureEndpoint.replace(/\/openai\/v1\/?$/, '').replace(/\/$/, '')}
+                    /openai/v1
+                  </code>
                 </div>
               </>
             ) : (

@@ -120,7 +120,12 @@ function startNext() {
     type: 'start',
     run,
     dataDir,
-    modelApiKey: run.settings.modelProvider === 'openrouter' ? keys.get() : undefined,
+    modelApiKey:
+      run.settings.modelProvider === 'openrouter'
+        ? keys.get()
+        : run.settings.modelProvider === 'azure'
+          ? keys.getAzure()
+          : undefined,
   });
   broadcast();
 }
@@ -151,7 +156,13 @@ app.post('/api/scenarios/generate', async (req, res) => {
   if (generating) return void res.status(409).json({ error: '別のシナリオを生成中です' });
   generating = true;
   try {
-    const draft = await generateScenario(url, prompt, getSettings(), keys.get());
+    const settings = getSettings();
+    const draft = await generateScenario(
+      url,
+      prompt,
+      settings,
+      settings.modelProvider === 'azure' ? keys.getAzure() : keys.get(),
+    );
     res.json(draft);
   } catch (error) {
     res.status(502).json({
@@ -187,6 +198,7 @@ app.put('/api/settings', (req, res) => {
   const update = settingsUpdateSchema.parse(req.body);
   const settings = settingsSchema.parse(update);
   keys.update(update.openRouterApiKey, update.clearOpenRouterApiKey);
+  keys.updateAzure(update.azureApiKey, update.clearAzureApiKey);
   saveSettings(settings);
   broadcast();
   res.json(settings);
@@ -198,7 +210,9 @@ app.get('/api/health', async (_req, res) => {
     laya: { ok: false, message: '未接続' },
   };
   await Promise.all([
-    checkModelHealth(settings, { apiKey: keys.get() }).then((model) => {
+    checkModelHealth(settings, {
+      apiKey: settings.modelProvider === 'azure' ? keys.getAzure() : keys.get(),
+    }).then((model) => {
       result.model = model;
     }),
     (async () => {

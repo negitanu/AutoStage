@@ -19,17 +19,71 @@ export function parseModelJson(content: string) {
 }
 export const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 type ConnectionOptions = { apiKey?: string; fetch?: typeof fetch };
+const azureUnsupportedSchemaKeywords = new Set([
+  'minLength',
+  'maxLength',
+  'pattern',
+  'format',
+  'minimum',
+  'maximum',
+  'multipleOf',
+  'patternProperties',
+  'unevaluatedProperties',
+  'propertyNames',
+  'minProperties',
+  'maxProperties',
+  'unevaluatedItems',
+  'contains',
+  'minContains',
+  'maxContains',
+  'minItems',
+  'maxItems',
+  'uniqueItems',
+]);
+function azureJsonSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(azureJsonSchema);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) => {
+      if (azureUnsupportedSchemaKeywords.has(key)) return [];
+      if (key === 'properties' || key === '$defs' || key === 'definitions')
+        return [
+          [
+            key,
+            Object.fromEntries(
+              Object.entries(child as Record<string, unknown>).map(([name, schema]) => [
+                name,
+                azureJsonSchema(schema),
+              ]),
+            ),
+          ],
+        ];
+      return [[key, azureJsonSchema(child)]];
+    }),
+  );
+}
 function connection(settings: Settings, options: ConnectionOptions) {
-  const remote = settings.modelProvider === 'openrouter';
-  if (remote && !options.apiKey) throw new Error('OpenRouter API キーを設定してください');
+  const openRouter = settings.modelProvider === 'openrouter';
+  const azure = settings.modelProvider === 'azure';
+  if ((openRouter || azure) && !options.apiKey)
+    throw new Error(`${openRouter ? 'OpenRouter' : 'Azure OpenAI'} API キーを設定してください`);
+  const azureEndpoint = settings.azureEndpoint.replace(/\/$/, '');
   return {
-    remote,
-    baseUrl: remote ? OPENROUTER_BASE_URL : settings.modelBaseUrl.replace(/\/$/, ''),
+    openRouter,
+    azure,
+    baseUrl: openRouter
+      ? OPENROUTER_BASE_URL
+      : azure
+        ? azureEndpoint.endsWith('/openai/v1')
+          ? azureEndpoint
+          : `${azureEndpoint}/openai/v1`
+        : settings.modelBaseUrl.replace(/\/$/, ''),
     headers: {
       'Content-Type': 'application/json',
-      ...(remote ? { Authorization: `Bearer ${options.apiKey}` } : {}),
+      ...(openRouter ? { Authorization: `Bearer ${options.apiKey}` } : {}),
+      ...(azure ? { 'api-key': options.apiKey! } : {}),
     },
-    label: remote ? 'OpenRouter' : 'ローカル生成モデル',
+    label: openRouter ? 'OpenRouter' : azure ? 'Azure OpenAI' : 'ローカル生成モデル',
   };
 }
 function apiError(label: string, status: number, upstreamMessage?: string) {
@@ -37,7 +91,7 @@ function apiError(label: string, status: number, upstreamMessage?: string) {
     status === 401 || status === 403
       ? 'API キーとアクセス権を確認してください'
       : status === 402
-        ? 'OpenRouter の残高・利用上限を確認してください'
+        ? `${label} の残高・利用上限を確認してください`
         : status === 429
           ? '利用制限に達しました。時間をおいて再実行してください'
           : status === 404 &&
@@ -45,7 +99,9 @@ function apiError(label: string, status: number, upstreamMessage?: string) {
                 'No endpoints found that can handle the requested parameters',
               )
             ? '選択モデルの提供元が要求されたパラメータに対応していません。JSON Schema に対応するモデルと提供元を確認してください'
-            : 'モデル名と構造化出力の対応を確認してください';
+            : label === 'Azure OpenAI'
+              ? 'リソース URL、デプロイ名と構造化出力の対応を確認してください'
+              : 'モデル名と構造化出力の対応を確認してください';
   return new Error(`${label}: HTTP ${status}。${detail}。`);
 }
 export function createModel(
@@ -76,18 +132,22 @@ export function createModel(
       headers: config.headers,
       body: JSON.stringify({
         model: modelLabel(settings),
-        ...(config.remote ? { provider: { require_parameters: true } } : {}),
+        ...(config.openRouter ? { provider: { require_parameters: true } } : {}),
         messages,
-        // Some OpenRouter models reject temperature entirely. With strict provider
-        // routing, including it would exclude every otherwise compatible endpoint.
-        ...(!config.remote ? { temperature: params.temperature ?? 0 } : {}),
-        max_tokens: 4096,
+        // Reasoning models may reject temperature; OpenRouter's strict routing
+        // can also exclude every compatible endpoint when it is present.
+        ...(!config.openRouter && !config.azure ? { temperature: params.temperature ?? 0 } : {}),
+        ...(config.azure ? { max_completion_tokens: 4096 } : { max_tokens: 4096 }),
         stream: false,
         ...(format?.type === 'json_schema'
           ? {
               response_format: {
                 type: 'json_schema',
-                json_schema: { name: format.name, strict: true, schema: format.schema },
+                json_schema: {
+                  name: format.name,
+                  strict: true,
+                  schema: config.azure ? azureJsonSchema(format.schema) : format.schema,
+                },
               },
             }
           : {}),
@@ -146,7 +206,7 @@ export async function checkModelHealth(
         redirect: 'error',
         signal: AbortSignal.timeout(8000),
       });
-    if (config.remote) {
+    if (config.openRouter) {
       const key = await request('key');
       if (!key.ok) throw apiError(config.label, key.status);
     }
@@ -156,15 +216,16 @@ export async function checkModelHealth(
       data?: { id: string; supported_parameters?: string[] }[];
     };
     const models = (body.data ?? [])
-      .filter((m) => !config.remote || m.supported_parameters?.includes('structured_outputs'))
+      .filter((m) => !config.openRouter || m.supported_parameters?.includes('structured_outputs'))
       .map((m) => m.id);
     const model = modelLabel(settings);
-    const ok = models.includes(model);
+    // Azure lists model offerings, while inference addresses deployment names.
+    const ok = config.azure || models.includes(model);
     return {
       ok,
-      models,
+      models: config.azure ? undefined : models,
       message: ok
-        ? `${model} · ${config.remote ? 'キー確認済み（推論は未実行）' : '準備完了'}`
+        ? `${model} · ${config.azure ? '接続確認済み（デプロイ・推論は未実行）' : config.openRouter ? 'キー確認済み（推論は未実行）' : '準備完了'}`
         : `モデル ${model} が見つからないか、JSON Schema に対応していません`,
     };
   } catch (error) {
