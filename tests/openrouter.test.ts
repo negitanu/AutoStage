@@ -34,6 +34,7 @@ test('OpenRouter uses fixed endpoint, bearer auth, strict schema routing and sel
       assert.equal(body.model, 'test/structured');
       assert.deepEqual(body.provider, { require_parameters: true });
       assert.equal(body.response_format.json_schema.strict, true);
+      assert.equal(body.temperature, undefined);
       assert.equal(body.stream, false);
       assert.equal(String(init?.body).includes('test-secret'), false);
       return Response.json({ choices: [{ message: { content: '{"success":true}' } }] });
@@ -52,6 +53,7 @@ test('local provider never receives OpenRouter credentials or routing parameters
       assert.equal(url, 'http://127.0.0.1:11434/v1/chat/completions');
       assert.equal(new Headers(init?.headers).has('Authorization'), false);
       assert.equal(JSON.parse(String(init?.body)).provider, undefined);
+      assert.equal(JSON.parse(String(init?.body)).temperature, 0);
       return Response.json({ choices: [{ message: { content: '{}' } }] });
     }),
   })(request);
@@ -78,6 +80,22 @@ test('missing key fails without a request; upstream errors never echo credential
         !error.message.includes('test-secret'),
     );
   }
+  await assert.rejects(
+    createModel(settings, AbortSignal.timeout(1000), {
+      apiKey: 'test-secret',
+      fetch: fakeFetch(() =>
+        Response.json(
+          {
+            error: {
+              message: 'No endpoints found that can handle the requested parameters',
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    })(request),
+    /提供元が要求されたパラメータに対応していません/,
+  );
   await assert.rejects(
     createModel(settings, AbortSignal.timeout(1000), {
       apiKey: 'test-secret',

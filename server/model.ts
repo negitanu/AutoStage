@@ -32,7 +32,7 @@ function connection(settings: Settings, options: ConnectionOptions) {
     label: remote ? 'OpenRouter' : 'ローカル生成モデル',
   };
 }
-function apiError(label: string, status: number) {
+function apiError(label: string, status: number, upstreamMessage?: string) {
   const detail =
     status === 401 || status === 403
       ? 'API キーとアクセス権を確認してください'
@@ -40,7 +40,12 @@ function apiError(label: string, status: number) {
         ? 'OpenRouter の残高・利用上限を確認してください'
         : status === 429
           ? '利用制限に達しました。時間をおいて再実行してください'
-          : 'モデル名と構造化出力の対応を確認してください';
+          : status === 404 &&
+              upstreamMessage?.includes(
+                'No endpoints found that can handle the requested parameters',
+              )
+            ? '選択モデルの提供元が要求されたパラメータに対応していません。JSON Schema に対応するモデルと提供元を確認してください'
+            : 'モデル名と構造化出力の対応を確認してください';
   return new Error(`${label}: HTTP ${status}。${detail}。`);
 }
 export function createModel(
@@ -73,7 +78,9 @@ export function createModel(
         model: modelLabel(settings),
         ...(config.remote ? { provider: { require_parameters: true } } : {}),
         messages,
-        temperature: params.temperature ?? 0,
+        // Some OpenRouter models reject temperature entirely. With strict provider
+        // routing, including it would exclude every otherwise compatible endpoint.
+        ...(!config.remote ? { temperature: params.temperature ?? 0 } : {}),
         max_tokens: 4096,
         stream: false,
         ...(format?.type === 'json_schema'
@@ -91,7 +98,12 @@ export function createModel(
         `${config.label} に接続できません。ネットワークと接続設定を確認してください。`,
       );
     });
-    if (!response.ok) throw apiError(config.label, response.status);
+    if (!response.ok) {
+      const errorBody = (await response.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      throw apiError(config.label, response.status, errorBody?.error?.message);
+    }
     const body = (await response.json().catch(() => {
       throw new Error(`${config.label} から不正な応答を受信しました`);
     })) as {
