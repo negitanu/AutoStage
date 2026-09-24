@@ -498,6 +498,13 @@ time {
   align-items: center;
   margin-bottom: 27px;
 }
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .eyebrow {
   font-size: 9px;
   letter-spacing: 1.6px;
@@ -1553,6 +1560,59 @@ time {
   background: #141b1f;
   border-color: #3a484f;
 }
+.dialog-body label > textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 118px;
+  line-height: 1.65;
+  font-size: 13px;
+  background: #141b1f;
+  border-color: #3a484f;
+}
+.generate-intro {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  padding: 4px 0 21px;
+}
+.generate-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #293d2b;
+  color: var(--mint);
+}
+.generate-intro strong {
+  font-size: 15px;
+}
+.generate-intro p {
+  margin: 5px 0 0;
+  color: #91a2a8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.generate-model {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid #35443b;
+  border-radius: 7px;
+  color: #a9baae;
+  font-size: 11px;
+}
+.generate-model strong {
+  margin-left: auto;
+  color: var(--mint);
+  font-size: 12px;
+}
+.generate-body > .field-hint {
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
 .dialog-body label > input:focus {
   outline: 1px solid #8bb476;
 }
@@ -2098,13 +2158,17 @@ time {
     padding: 25px 13px 0;
   }
   .page-heading {
+    flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+  .heading-actions {
+    justify-content: flex-start;
   }
   .page-heading .button {
     font-size: 10px;
     padding: 9px 10px;
-    margin-top: 19px;
+    margin-top: 0;
   }
   .page-heading h1 {
     font-size: 26px;

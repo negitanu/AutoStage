@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { settingsSchema, scenarioSchema } from '../shared/schema.js';
+import { settingsSchema, scenarioSchema, generateScenarioRequestSchema } from '../shared/schema.js';
 import { createModel, parseModelJson, verdict } from '../server/model.js';
+import { draftFromModel } from '../server/generate.js';
 
 test('Laya confidence gating never promotes uncertain or invalid results', () => {
   assert.equal(verdict(0.95, 0.85), 'passed');
@@ -59,6 +60,42 @@ test('scenario validation rejects empty assertions and duplicate step IDs', () =
   assert.equal(scenarioSchema.safeParse(scenario).success, true);
   scenario.steps.push(scenario.steps[0]);
   assert.equal(scenarioSchema.safeParse(scenario).success, false);
+});
+test('generated plans are validated, start at the observed page, and cannot navigate to another site', () => {
+  const output = {
+    name: 'ログインを確認',
+    description: 'フォームを検証',
+    steps: [{ type: 'assertVisible', title: '入力欄を確認', target: '[name="email"]', value: '' }],
+  };
+  const draft = draftFromModel(output, 'https://example.com/login');
+  assert.equal(draft.steps[0].target, 'https://example.com/login');
+  assert.equal(draft.steps[1].type, 'assertVisible');
+  assert.equal(draft.tags[0], 'AI 生成');
+  assert.equal(scenarioSchema.safeParse(draft).success, true);
+  assert.throws(
+    () =>
+      draftFromModel(
+        {
+          ...output,
+          steps: [{ ...output.steps[0], type: 'navigate', target: 'https://evil.example/' }],
+        },
+        'https://example.com/login',
+      ),
+    /別のサイト/,
+  );
+  assert.throws(() =>
+    draftFromModel(
+      { ...output, steps: [{ ...output.steps[0], type: 'assertText', value: '' }] },
+      'https://example.com/login',
+    ),
+  );
+  assert.equal(
+    generateScenarioRequestSchema.safeParse({
+      url: 'https://user:secret@example.com/',
+      prompt: 'ログインの表示を確認',
+    }).success,
+    false,
+  );
 });
 test('real HTTP adapter sends structured schema, configured model and local messages', async () => {
   let captured: Record<string, unknown> = {};

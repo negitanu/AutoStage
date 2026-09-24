@@ -1,4 +1,5 @@
 import { credentials } from './credentials.js';
+import { generateScenario } from './generate.js';
 import { checkModelHealth } from './model.js';
 import express from 'express';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
 import {
   scenarioSchema,
+  generateScenarioRequestSchema,
   settingsSchema,
   settingsUpdateSchema,
   type Run,
@@ -56,6 +58,7 @@ function broadcast() {
   for (const res of subscribers) res.write('event: refresh\ndata: {}\n\n');
 }
 let active: { id: string; child: ChildProcess; watchdog: NodeJS.Timeout } | undefined;
+let generating = false;
 
 function markStopped(id: string, status: 'failed' | 'cancelled', message: string) {
   const run = getRun(id);
@@ -142,6 +145,26 @@ app.get('/api/events', (req, res) => {
     clearInterval(heartbeat);
     subscribers.delete(res);
   });
+});
+app.post('/api/scenarios/generate', async (req, res) => {
+  const { url, prompt } = generateScenarioRequestSchema.parse(req.body);
+  if (generating) return void res.status(409).json({ error: '別のシナリオを生成中です' });
+  generating = true;
+  try {
+    const draft = await generateScenario(url, prompt, getSettings(), keys.get());
+    res.json(draft);
+  } catch (error) {
+    res.status(502).json({
+      error:
+        error instanceof ZodError
+          ? '生成された手順がシナリオ形式に合いません。指示を調整して再試行してください'
+          : error instanceof Error
+            ? error.message
+            : 'シナリオを生成できませんでした',
+    });
+  } finally {
+    generating = false;
+  }
 });
 app.post('/api/scenarios', (req, res) => {
   const item = saveScenario(scenarioSchema.parse(req.body));

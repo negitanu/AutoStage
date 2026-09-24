@@ -65,7 +65,8 @@ type State = {
   credentials: CredentialStatus;
 };
 type Modal =
-  | { type: 'edit'; scenario?: Scenario }
+  | { type: 'edit'; scenario?: Scenario; initial?: ScenarioInput }
+  | { type: 'generate' }
   | { type: 'settings' }
   | { type: 'image'; url: string }
   | { type: 'delete'; scenario: Scenario }
@@ -99,6 +100,17 @@ const date = (iso: string) =>
     minute: '2-digit',
   });
 const isActive = (run?: Run) => !!run && ['queued', 'running'].includes(run.status);
+const scenarioEntryUrl = (scenario?: Scenario) => {
+  if (!scenario) return window.location.origin;
+  try {
+    return new URL(
+      scenario.steps.find((step) => step.type === 'navigate')?.target || '',
+      scenario.baseUrl,
+    ).href;
+  } catch {
+    return scenario.baseUrl;
+  }
+};
 const connectionError = 'ローカルサーバーとの接続を確認しています。起動後に自動で再接続します。';
 async function api<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api${url}`, {
@@ -513,10 +525,16 @@ export default function App() {
                   : 'すべての実行と、その根拠をひとつの場所に。'}
               </p>
             </div>
-            <button className="button secondary" onClick={() => setModal({ type: 'edit' })}>
-              <Plus size={16} />
-              新規シナリオ
-            </button>
+            <div className="heading-actions">
+              <button className="button secondary" onClick={() => setModal({ type: 'edit' })}>
+                <Plus size={16} />
+                新規シナリオ
+              </button>
+              <button className="button primary" onClick={() => setModal({ type: 'generate' })}>
+                <WandSparkles size={16} />
+                AI でシナリオ作成
+              </button>
+            </div>
           </div>
           {error && (
             <div className="error-banner" role="alert">
@@ -1044,6 +1062,7 @@ export default function App() {
       {modal?.type === 'edit' && (
         <ScenarioEditor
           scenario={modal.scenario}
+          initial={modal.initial}
           onClose={() => setModal(null)}
           onSave={async (input) => {
             const saved = await api<Scenario>(
@@ -1056,6 +1075,15 @@ export default function App() {
             setModal(null);
             setToast('シナリオを保存しました');
           }}
+        />
+      )}
+      {modal?.type === 'generate' && (
+        <GenerateDialog
+          initialUrl={scenarioEntryUrl(scenario)}
+          modelName={modelLabel(state.settings)}
+          cloud={state.settings.modelProvider === 'openrouter'}
+          onClose={() => setModal(null)}
+          onGenerated={(initial) => setModal({ type: 'edit', initial })}
         />
       )}
       {modal?.type === 'settings' && (
@@ -1111,31 +1139,133 @@ export default function App() {
   );
 }
 
+function GenerateDialog({
+  initialUrl,
+  modelName,
+  cloud,
+  onClose,
+  onGenerated,
+}: {
+  initialUrl: string;
+  modelName: string;
+  cloud: boolean;
+  onClose: () => void;
+  onGenerated: (initial: ScenarioInput) => void;
+}) {
+  const [url, setUrl] = useState(initialUrl);
+  const [prompt, setPrompt] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <Dialog title="ページからシナリオを作成" onClose={onClose}>
+      <form
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setLoading(true);
+          setError('');
+          try {
+            onGenerated(await api<ScenarioInput>('/scenarios/generate', 'POST', { url, prompt }));
+          } catch (reason) {
+            setError((reason as Error).message);
+          } finally {
+            setLoading(false);
+          }
+        }}
+      >
+        <div className="dialog-body generate-body">
+          <div className="generate-intro">
+            <div className="generate-icon">
+              <WandSparkles size={22} />
+            </div>
+            <div>
+              <strong>ページを見て、試験手順を提案</strong>
+              <p>対象ページをブラウザで分析し、操作と検証の下書きを作ります。</p>
+            </div>
+          </div>
+          <label>
+            対象ページの URL
+            <input
+              type="url"
+              required
+              maxLength={2048}
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://example.com/login"
+            />
+          </label>
+          <label>
+            行いたい試験
+            <textarea
+              required
+              minLength={10}
+              maxLength={4000}
+              rows={5}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              placeholder="例: ログインフォームにメールアドレスとパスワードを入力し、ログイン後にダッシュボードが表示されることを確認する"
+            />
+          </label>
+          <div className="generate-model">
+            <Bot size={15} />
+            <span>生成モデル</span>
+            <strong>{modelName}</strong>
+          </div>
+          {cloud && (
+            <p className="field-hint">
+              ページの内容と試験指示を OpenRouter に送信します。API 利用料が発生する場合があります。
+            </p>
+          )}
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+        <footer className="dialog-footer">
+          <span>生成後に編集できます</span>
+          <div>
+            <button type="button" className="button secondary" onClick={onClose}>
+              キャンセル
+            </button>
+            <button className="button primary" disabled={loading}>
+              {loading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+              {loading ? 'ページを分析中…' : 'シナリオを生成'}
+            </button>
+          </div>
+        </footer>
+      </form>
+    </Dialog>
+  );
+}
+
 function ScenarioEditor({
   scenario,
+  initial,
   onClose,
   onSave,
 }: {
   scenario?: Scenario;
+  initial?: ScenarioInput;
   onClose: () => void;
   onSave: (input: ScenarioInput) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<ScenarioInput>(
-    scenario || {
-      name: '',
-      description: '',
-      baseUrl: 'http://127.0.0.1:4310',
-      tags: [],
-      steps: [
-        {
-          id: crypto.randomUUID(),
-          type: 'navigate',
-          title: 'ページを開く',
-          target: '/demo/',
-          value: '',
-        },
-      ],
-    },
+    scenario ||
+      initial || {
+        name: '',
+        description: '',
+        baseUrl: 'http://127.0.0.1:4310',
+        tags: [],
+        steps: [
+          {
+            id: crypto.randomUUID(),
+            type: 'navigate',
+            title: 'ページを開く',
+            target: '/demo/',
+            value: '',
+          },
+        ],
+      },
   );
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1151,7 +1281,11 @@ function ScenarioEditor({
     setDraft({ ...draft, steps });
   };
   return (
-    <Dialog title={scenario ? 'シナリオを編集' : '新しいシナリオ'} wide onClose={onClose}>
+    <Dialog
+      title={scenario ? 'シナリオを編集' : initial ? '生成されたシナリオを確認' : '新しいシナリオ'}
+      wide
+      onClose={onClose}
+    >
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -1167,6 +1301,14 @@ function ScenarioEditor({
         }}
       >
         <div className="dialog-body editor-body">
+          {initial && (
+            <div className="provider-notice">
+              <Sparkles size={17} />
+              <p>
+                ページの観測結果から作成した下書きです。操作対象と期待結果を確認してから保存してください。
+              </p>
+            </div>
+          )}
           <div className="form-grid">
             <label>
               シナリオ名

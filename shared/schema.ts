@@ -49,6 +49,16 @@ export const scenarioSchema = z
     (v) => new Set(v.steps.map((s) => s.id)).size === v.steps.length,
     'ステップ ID が重複しています',
   );
+export const generateScenarioRequestSchema = z.object({
+  url: z
+    .url()
+    .max(2048)
+    .refine((value) => {
+      const url = new URL(value);
+      return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password;
+    }, '認証情報を含まない HTTP(S) URL を指定してください'),
+  prompt: z.string().trim().min(10).max(4000),
+});
 const privateUrl = (hosts: string[]) =>
   z.url().refine((v) => {
     const u = new URL(v);

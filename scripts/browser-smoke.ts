@@ -25,9 +25,56 @@ const fixture = createServer(async (req, res) => {
   if (req.url === '/v1/chat/completions') {
     const request = JSON.parse(body) as {
       messages: { content: string }[];
-      response_format: { type: string };
+      response_format: { type: string; json_schema: { name: string } };
     };
     const prompt = request.messages.map((m) => m.content).join('\n');
+    if (request.response_format.json_schema.name === 'ScenarioDraft') {
+      assert.match(prompt, /Forma — Sample workspace/);
+      assert.match(prompt, /email/);
+      assert.match(prompt, /Sign in/);
+      res.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  name: '生成したログインテスト',
+                  description: 'フォームとログイン後の表示を確認',
+                  steps: [
+                    {
+                      type: 'fill',
+                      title: 'メールを入力',
+                      target: '[name="email"]',
+                      value: 'demo@autostage.dev',
+                    },
+                    {
+                      type: 'fill',
+                      title: 'パスワードを入力',
+                      target: '[name="password"]',
+                      value: 'stagehand-demo',
+                    },
+                    {
+                      type: 'click',
+                      title: 'ログイン',
+                      target: 'button[type="submit"]',
+                      value: '',
+                    },
+                    {
+                      type: 'assertVisible',
+                      title: 'ダッシュボードを確認',
+                      target: '[data-testid="dashboard"]',
+                      value: '',
+                    },
+                  ],
+                }),
+              },
+              finish_reason: 'stop',
+            },
+          ],
+        }),
+      );
+      return;
+    }
     const line = prompt
       .split('\n')
       .find((l) => /\[\d+-\d+\]/.test(l) && /button/i.test(l) && /Sign in/i.test(l));
@@ -110,6 +157,19 @@ try {
     modelName: 'fixture-qwen',
     layaBaseUrl: `http://127.0.0.1:${(fixture.address() as { port: number }).port}`,
   });
+  const beforeGeneration = (await state()).scenarios.length;
+  const generated = await request<Scenario>('/scenarios/generate', 'POST', {
+    url: `${base}/demo/`,
+    prompt: 'メールとパスワードでログインし、ダッシュボードの表示を確認する',
+  });
+  assert.equal(generated.name, '生成したログインテスト');
+  assert.equal(generated.steps[0].type, 'navigate');
+  assert.equal(generated.steps[0].target, `${base}/demo/`);
+  assert.equal(generated.steps.length, 5);
+  assert.equal((await state()).scenarios.length, beforeGeneration);
+  const savedGenerated = await request<Scenario>('/scenarios', 'POST', generated);
+  assert.equal((await waitRun((await start(savedGenerated.id)).id)).status, 'passed');
+  console.log('PASS Stagehand page analysis → model draft → explicit save → actual browser run');
   const login = initial.scenarios.find((s) => s.name === 'ログインフロー')!;
   const run = await waitRun((await start(login.id)).id);
   assert.equal(run.status, 'passed', JSON.stringify(run.logs));
